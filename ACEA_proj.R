@@ -6,6 +6,7 @@ library(modeltime)
 library(modeltime.resample)
 library(modeltime.ensemble)
 library(visdat)
+library(corrplot)
 
 # 2.0 Data ----
 
@@ -17,6 +18,7 @@ vis_dat(data)
 
 vis_miss(data)
 
+data<- data %>% rename(Date = ï..Date)
 # 3.0 Data preparation ----
 
 na_indexes<- which(is.na(data$Depth_to_Groundwater_LT2))
@@ -27,10 +29,8 @@ full_data_LT2<- data[-na_indexes,]
 full_data_SAL<- data[-na_indexes_SAL,]
 
 
-full_data_LT2<- full_data_LT2 %>% rename(Date = ï..Date)
 full_data_LT2$Date<- as.Date(full_data_LT2$Date, format = c('%d/%m/%Y'))
 
-full_data_SAL<- full_data_SAL %>% rename(Date = ï..Date)
 full_data_SAL$Date<- as.Date(full_data_SAL$Date, format = c('%d/%m/%Y'))
 
 
@@ -211,12 +211,11 @@ submodel_calibrate_tbl %>% modeltime_forecast(new_data = testing(splits),
 
 submodel_calibrate_tbl_SAL %>% modeltime_forecast(new_data = testing(splits_SAL),
                                                   actual_data = train_SAL_tbl,
-                                                  keep_data = TRUE) %>%
+                                                  keep_data = TRUE) 
                                plot_modeltime_forecast()
 
 
 #Refit
-
 submodels_refit_tbl<- submodel_calibrate_tbl %>%
                       modeltime_refit(train_LT2_tbl)
 
