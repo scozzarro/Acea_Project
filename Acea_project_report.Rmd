@@ -1,0 +1,339 @@
+---
+title: "ACEA Smart Water Project"
+author: "Gabriel Scozzarro"
+date: "19/1/2021"
+output: pdf_document
+mainfont: Arial
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1.0 Introduction
+
+The Acea Group is one of the leading Italian multiutility operators. Listed on the Italian Stock Exchange since 1999, the company manages and develops water and electricity networks and environmental services. Acea is the foremost Italian operator in the water services sector supplying 9 million inhabitants in Lazio, Tuscany, Umbria, Molise, Campania.
+The aim of this project is to analyze the data provided and propose one or more a prediction models to forecast water availability for each waterbody.
+To do that the type of questions that needs to be answered are for example:
+
+How the different waterbodies operate?
+How data was collected?
+How climate data affects the water availability ?
+How was the behavior of the different waterbodies in the past?
+
+This report will use the R language with additional packages. 
+
+````{r lib & tools, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+library(tidyverse)
+library(tidymodels)
+library(timetk)
+library(modeltime)
+library(modeltime.resample)
+library(modeltime.ensemble)
+library(visdat)
+library(kableExtra)
+library(corrplot)
+````
+
+## 2.0 Data
+Each waterbody has unique characteristics and their attributes are not linked to each other. Datasets provided are completely independent from each other and the related features are also different. These variances are expected based upon the unique behavior and characteristics of each waterbody. It is fundamental to deepen the structure and the operation for each type of waterbody
+
+They provide data for 4 different types of waterbody: aquifer, water spring, river and lake. 
+Nine datasets were provided:
+
+* **Auser**, 
+Type: aquifer
+Description: This waterbody consists of two subsystems, called NORTH and SOUTH, where the former partly influences the behavior of the latter. Indeed, the north subsystem is a water table (or unconfined) aquifer while the south subsystem is an artesian (or confined) groundwater.The levels of the NORTH sector are represented by the values of the SAL, PAG, CoS and DIEC wells, while the levels of the SOUTH sector by the LT2 well.
+
+
+* **Petrignano**, 
+Type: aquifer
+Description: The wells field of the alluvial plain between Ospedalicchio di Bastia Umbra and Petrignano is fed by three underground aquifers separated by low permeability septa. The aquifer can be considered a water table groundwater and is also fed by the Chiascio river. The groundwater levels are influenced by the following parameters: rainfall, depth to groundwater, temperatures and drainage volumes, level of the Chiascio river.
+
+
+* **Doganella**, 
+Type: aquifer
+Description: The wells field Doganella is fed by two underground aquifers not fed by rivers or lakes but fed by meteoric infiltration. The upper aquifer is a water table with a thickness of about 30m. The lower aquifer is a semi-confined artesian aquifer with a thickness of 50m and is located inside lavas and tufa products. These aquifers are accessed through wells called Well 1, ..., Well 9. Approximately 80% of the drainage volumes come from the artesian aquifer. The aquifer levels are influenced by the following parameters: rainfall, humidity, subsoil, temperatures and drainage volumes.
+
+
+* **Luco**, 
+Type: aquifer
+Description: The Luco wells field is fed by an underground aquifer. This aquifer not fed by rivers or lakes but by meteoric infiltration at the extremes of the impermeable sedimentary layers. Such aquifer is accessed through wells called Well 1, Well 3 and Well 4 and is influenced by the following parameters: rainfall, depth to groundwater, temperature and drainage volumes.
+
+* **Amiata**,
+Type: water spring
+Description: The Amiata waterbody is composed of a volcanic aquifer not fed by rivers or lakes but fed by meteoric infiltration. This aquifer is accessed through Ermicciolo, Arbure, Bugnano and Galleria Alta water springs. The levels and volumes of the four sources are influenced by the parameters: rainfall, depth to groundwater, hydrometry, temperatures and drainage volumes.
+
+* **Madonna di Canneto**,
+Type: water spring
+Description: The Madonna di Canneto spring is situated at an altitude of 1010m above sea level in the Canneto valley. It does not consist of an aquifer and its source is supplied by the water catchment area of the river Melfa.
+
+* **Lupa**,
+Type: water spring
+Description: this water spring is located in the Rosciano Valley, on the left side of the Nera river. The waters emerge at an altitude of about 375 meters above sea level through a long draining tunnel that crosses, in its final section, lithotypes and essentially calcareous rocks. It provides drinking water to the city of Terni and the towns around it.
+
+* **Arno**,
+Type: river
+Description: Arno is the second largest river in peninsular Italy and the main waterway in Tuscany and it has a relatively torrential regime, due to the nature of the surrounding soils (marl and impermeable clays). Arno results to be the main source of water supply of the metropolitan area of Florence-Prato-Pistoia. The availability of water for this waterbody is evaluated by checking the hydrometric level of the river at the section of Nave di Rosano.
+
+* **Bilancino**,
+Type: lake
+Description: Bilancino lake is an artificial lake located in the municipality of Barberino di Mugello (about 50 km from Florence). It is used to refill the Arno river during the summer months. Indeed, during the winter months, the lake is filled up and then, during the summer months, the water of the lake is poured into the Arno river.
+
+![](Immagini/target_table.png)
+We will start working on Aquifer Auser
+````{r import data, echo = FALSE}
+data<- read.csv('E:/Data_science/Acea_project/Aquifer_Auser.csv')
+data<- data %>% rename(Date = ï..Date)
+
+````
+
+### 1: Auser 
+
+
+````{r data impoted analysis, echo = FALSE}
+feature_desc_auser<- c('Date', 'rainfall level', 'rainfall level', 'rainfall level', 'rainfall level','rainfall level','rainfall level','rainfall level','rainfall level','rainfall level','rainfall level', 'level of water', 'level of water','level of water','level of water','level of water','Local Temperature','Local Temperature','Local Temperature','Local Temperature', 'Volume of water used by population', 'Volume of water used by population','Volume of water used by population','Volume of water used by population','Volume of water used by population', 'Local Hydrometry', 'Local Hydrometry')
+
+data_class_auser<- data %>% imap_dfr(~ tibble(colname = .y, classes = class(.x) %>% str_c(collapse = ", ")))
+
+glimpse_data_auser<- data.frame(Feature = colnames(data), Description = feature_desc_auser, type = data_class_auser$classes)
+
+glimpse_data_auser %>% kable('latex', digits = 10, caption = 'Data summary table', booktabs = T) %>% kable_styling(full_width = FALSE, font_size = 11, latex_options = c("striped", 'condensed','scale_down')) %>% column_spec(3, width = "12em")
+  
+vis_dat(data)
+
+vis_miss(data)
+````
+The collected data in Auser aquifer dataset can be divided in mainly 4 categories describing, respectively: water depth (some of these variables will be), explanations, amount of precipitation, temperature and amount of water. We have the most complete data on temperature, there are no deficiencies across the entire database (from 03-1998). We have data on depth and precipitation from around 2006, and data on the amount of water from around 2005. You can also find individual missing data or appearing in small series here and there, in particular for depth variables.
+
+We proceed forward cleaning the dataset
+````{r Auser cleaning, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+na_indexes<- which(is.na(data$Depth_to_Groundwater_LT2))
+na_indexes_SAL<- which(is.na(data$Depth_to_Groundwater_SAL))
+
+full_data_LT2<- data[-na_indexes,]
+full_data_SAL<- data[-na_indexes_SAL,]
+
+
+full_data_LT2$Date<- as.Date(full_data_LT2$Date, format = c('%d/%m/%Y'))
+
+full_data_SAL$Date<- as.Date(full_data_SAL$Date, format = c('%d/%m/%Y'))
+
+````
+
+As shown before for aquifer Auser we have 3 different target value for the prediction model. Their trends over time are:
+
+````{r target trend, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+full_data_LT2 %>% select(Date, Depth_to_Groundwater_LT2) %>%
+                  plot_time_series(Date, 
+                                   Depth_to_Groundwater_LT2,
+                                   .title = 'LT2 Ground Water trend over time',
+                                   .interactive = FALSE)
+
+full_data_LT2 %>% ggplot(aes(Depth_to_Groundwater_LT2)) +
+                  geom_boxplot() +
+                  coord_flip() +
+                  ggtitle('LT2 Ground Water values')
+
+full_data_SAL %>% select(Date, Depth_to_Groundwater_SAL) %>%
+                  plot_time_series(Date, 
+                                   Depth_to_Groundwater_SAL,
+                                   .title = 'SAL Ground Water trend over time',
+                                   .interactive = FALSE)
+
+full_data_SAL %>% ggplot(aes(Depth_to_Groundwater_SAL)) +
+                  geom_boxplot() +
+                  coord_flip() +
+                  ggtitle('SAL Ground Water values')
+````
+In this target values there are some serious outliers especially after 2020. This could be caused by sensors malfunction. I decide to get rid of this values that could deceive the prediction model. 
+
+````{r outliers, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+LT2_outliers <- boxplot.stats(full_data_LT2$Depth_to_Groundwater_LT2)$out
+LT2_outliers_indexes <- which(full_data_LT2$Depth_to_Groundwater_LT2%in% LT2_outliers)
+full_data_LT2<- full_data_LT2[-LT2_outliers_indexes,]
+
+
+SAL_outliers <- boxplot.stats(full_data_SAL$Depth_to_Groundwater_SAL)$out
+SAL_outliers_indexes <- which(full_data_SAL$Depth_to_Groundwater_SAL %in% SAL_outliers)
+full_data_SAL<- full_data_SAL[-SAL_outliers_indexes,]
+````
+Thanks to deep investigation on the operations of Auser aquifer we discover that target values are very correlated to volume of water described in Volume_POL, Volume_CC1, Volume_CC2, Volume_CSA and Volume_CSAL.
+
+````{r volume correlation, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+full_data_LT2 %>% ggplot(aes(Volume_POL, Depth_to_Groundwater_LT2)) +
+                  geom_point() +
+                  geom_smooth(method = 'gam')
+
+full_data_SAL %>% ggplot(aes(Volume_POL, Depth_to_Groundwater_SAL)) +
+                  geom_point() +
+                  geom_smooth(method = 'gam')
+
+````
+Other correlation are shown as follow:
+
+````{r Correlation, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+data %>% drop_na() %>% select(!c('Date')) %>% 
+                       cor(., method = "spearman", use = "complete.obs") %>% 
+                       corrplot(method = 'circle', tl.cex = 0.6)
+````
+
+## Prediction Model 
+
+Since the nature of the datasets is temporal the first prediction model approach is a Time series forecasting. 
+The temporal horizon for the forecast is 360 days. This method will be apply on 2 target variable to asses the efficacy.
+
+````{r ML Preparation, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+forecast_horizon<- 360
+
+full_data_LT2_tbl<- full_data_LT2 %>% 
+                    select(Date, Depth_to_Groundwater_LT2) %>%
+                    future_frame(.date_var = Date, .length_out = forecast_horizon, .bind_data = TRUE)
+
+full_data_SAL_tbl<- full_data_SAL %>% 
+                    select(Date, Depth_to_Groundwater_SAL) %>%
+                    future_frame(.date_var = Date, .length_out = forecast_horizon, .bind_data = TRUE)
+
+train_LT2_tbl<- full_data_LT2_tbl %>% filter(!is.na(Depth_to_Groundwater_LT2))
+
+train_SAL_tbl<- full_data_SAL_tbl %>% filter(!is.na(Depth_to_Groundwater_SAL))
+
+#Future Data
+future_LT2_tbl<- full_data_LT2_tbl %>% filter(is.na(Depth_to_Groundwater_LT2))
+
+future_SAL_tbl<- full_data_SAL_tbl %>% filter(is.na(Depth_to_Groundwater_SAL))
+````
+
+````{r time splits, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+splits<- train_LT2_tbl %>% time_series_split(date_var = Date, assess = forecast_horizon, cumulative = TRUE)
+
+
+splits_SAL<- train_SAL_tbl %>% time_series_split(date_var = Date, assess = forecast_horizon, cumulative = TRUE)
+````
+
+````{r Recipe, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+recipe_1<- recipe(Depth_to_Groundwater_LT2 ~., training(splits)) %>%
+           step_timeseries_signature(Date) %>%
+           step_rm(matches('(.iso)|(.xts$)|(hour)|(minute)|(second)|(am.pm)')) %>%
+           step_normalize(Date_index.num, Date_year) %>%
+           step_mutate(Date_day = factor(Date_day, ordered = TRUE)) %>%
+           step_dummy(all_nominal(), one_hot = TRUE)
+
+recipe_1_SAL<- recipe(Depth_to_Groundwater_SAL ~., training(splits_SAL)) %>%
+               step_timeseries_signature(Date) %>%
+               step_rm(matches('(.iso)|(.xts$)|(hour)|(minute)|(second)|(am.pm)')) %>%
+               step_normalize(Date_index.num, Date_year) %>%
+               step_mutate(Date_day = factor(Date_day, ordered = TRUE)) %>%
+               step_dummy(all_nominal(), one_hot = TRUE)
+
+
+
+recipe_2<- recipe_1 %>% update_role(Date, new_role = 'ID')
+recipe_2_SAL<- recipe_1_SAL %>% update_role(Date, new_role = 'ID')
+
+````
+
+````{r Models, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+#Prophet
+wflw_fit_prophet<- workflow() %>% 
+                   add_model(prophet_reg() %>% set_engine('prophet')) %>%
+                   add_recipe(recipe_1) %>%
+                   fit(training(splits))
+
+wflw_fit_prophet_SAL<- workflow() %>% 
+                       add_model(prophet_reg() %>% set_engine('prophet')) %>%
+                       add_recipe(recipe_1_SAL) %>%
+                       fit(training(splits_SAL))
+
+
+# XGBoost
+wflw_fit_xgboost<- workflow() %>% 
+                   add_model(boost_tree() %>% set_engine('xgboost')) %>%
+                   add_recipe(recipe_2) %>%
+                   fit(training(splits))
+
+wflw_fit_xgboost_SAL<- workflow() %>% 
+                       add_model(boost_tree() %>% set_engine('xgboost')) %>%
+                       add_recipe(recipe_2_SAL) %>%
+                       fit(training(splits_SAL))
+
+# Random Forest
+wflw_fit_rf<- workflow() %>% 
+              add_model(rand_forest() %>% set_engine('ranger')) %>%
+              add_recipe(recipe_2) %>%
+              fit(training(splits))
+
+
+wflw_fit_rf_SAL<- workflow() %>% 
+                  add_model(rand_forest() %>% set_engine('ranger')) %>%
+                  add_recipe(recipe_2_SAL) %>%
+                  fit(training(splits_SAL))
+
+# SVM 
+wflw_fit_svm<- workflow() %>% 
+               add_model(svm_rbf() %>% set_engine('kernlab')) %>%
+               add_recipe(recipe_2) %>%
+               fit(training(splits))
+
+wflw_fit_svm_SAL<- workflow() %>% 
+                   add_model(svm_rbf() %>% set_engine('kernlab')) %>%
+                   add_recipe(recipe_2_SAL) %>%
+                   fit(training(splits_SAL))
+
+# Prophet Boost
+wflw_fit_prophet_boost<- workflow() %>% 
+                         add_model(prophet_boost( seasonality_daily = FALSE, 
+                                                  seasonality_weekly = FALSE, 
+                                                  seasonality_yearly = FALSE) %>% set_engine('prophet_xgboost')) %>%
+                         add_recipe(recipe_1) %>%
+                         fit(training(splits))
+
+wflw_fit_prophet_boost_SAL<- workflow() %>% 
+                             add_model(prophet_boost( seasonality_daily = FALSE, 
+                                                      seasonality_weekly = FALSE, 
+                                                      seasonality_yearly = FALSE) %>% set_engine('prophet_xgboost')) %>%
+                             add_recipe(recipe_1_SAL) %>%
+                             fit(training(splits_SAL))
+````
+We create several models using different algorithm: Prophet, XGBoost, Random Forest, SVM and Prophet boost.
+Below the results obtained with this models for the prediction of Depth_to_Groundwater_LT2 an Depth_to_Groundwater_SAL.
+````{r modelling, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+submodels_tbl<- modeltime_table(wflw_fit_prophet,
+                                wflw_fit_xgboost,
+                                wflw_fit_rf,
+                                wflw_fit_svm,
+                                wflw_fit_prophet_boost)
+
+submodels_tbl_SAL<- modeltime_table(wflw_fit_prophet_SAL,
+                                    wflw_fit_xgboost_SAL,
+                                    wflw_fit_rf_SAL,
+                                    wflw_fit_svm_SAL,
+                                    wflw_fit_prophet_boost_SAL)
+
+# Calibrate testing data
+submodel_calibrate_tbl<- submodels_tbl %>% modeltime_calibrate(testing(splits))
+
+submodel_calibrate_tbl_SAL<- submodels_tbl_SAL %>% modeltime_calibrate(testing(splits_SAL))
+
+# Measure Accuracy
+submodel_calibrate_tbl %>% modeltime_accuracy() kable('latex', digits = 10, caption = 'Data summary table', booktabs = T) %>% kable_styling(full_width = FALSE, font_size = 11, latex_options = c("striped", 'condensed','scale_down')) %>% column_spec(3, width = "12em")
+
+submodel_calibrate_tbl_SAL %>% modeltime_accuracy() kable('latex', digits = 10, caption = 'Data summary table', booktabs = T) %>% kable_styling(full_width = FALSE, font_size = 11, latex_options = c("striped", 'condensed','scale_down')) %>% column_spec(3, width = "12em")
+````
+
+````{r viz forecast, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+submodel_calibrate_tbl %>% modeltime_forecast(new_data = testing(splits),
+                                              actual_data = train_LT2_tbl,
+                                              keep_data = TRUE) %>% 
+                           plot_modeltime_forecast(.title = 'Depth_to_Groundwater_LT2 forecast',
+                                                   .interactive = FALSE)
+
+submodel_calibrate_tbl_SAL %>% modeltime_forecast(new_data = testing(splits_SAL),
+                                                  actual_data = train_SAL_tbl,
+                                                  keep_data = TRUE) %>%
+                               filter(Date)
+                               plot_modeltime_forecast(.title = 'Depth_to_Groundwater_SAL forecast', 
+                                                       .interactive = FALSE)
+
+````
+p2<-p %+% mtcars[mtcars$disp>200,]
