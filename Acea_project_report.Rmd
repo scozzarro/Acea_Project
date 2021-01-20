@@ -297,6 +297,8 @@ wflw_fit_prophet_boost_SAL<- workflow() %>%
 ````
 We create several models using different algorithm: Prophet, XGBoost, Random Forest, SVM and Prophet boost.
 Below the results obtained with this models for the prediction of Depth_to_Groundwater_LT2 an Depth_to_Groundwater_SAL.
+\pagebreak
+
 ````{r modelling, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
 submodels_tbl<- modeltime_table(wflw_fit_prophet,
                                 wflw_fit_xgboost,
@@ -316,24 +318,130 @@ submodel_calibrate_tbl<- submodels_tbl %>% modeltime_calibrate(testing(splits))
 submodel_calibrate_tbl_SAL<- submodels_tbl_SAL %>% modeltime_calibrate(testing(splits_SAL))
 
 # Measure Accuracy
-submodel_calibrate_tbl %>% modeltime_accuracy() kable('latex', digits = 10, caption = 'Data summary table', booktabs = T) %>% kable_styling(full_width = FALSE, font_size = 11, latex_options = c("striped", 'condensed','scale_down')) %>% column_spec(3, width = "12em")
+submodel_calibrate_tbl %>% modeltime_accuracy() %>% kable('latex', digits = 10, caption = 'Depth to groundwater LT2 prediction model performance', booktabs = T) %>% kable_styling(full_width = FALSE, font_size = 11, latex_options = c("striped", 'condensed','scale_down')) %>% column_spec(3, width = "12em")
 
-submodel_calibrate_tbl_SAL %>% modeltime_accuracy() kable('latex', digits = 10, caption = 'Data summary table', booktabs = T) %>% kable_styling(full_width = FALSE, font_size = 11, latex_options = c("striped", 'condensed','scale_down')) %>% column_spec(3, width = "12em")
+submodel_calibrate_tbl_SAL %>% modeltime_accuracy() %>% kable('latex', digits = 10, caption = 'Depth to groundwater SAL prediction model performance', booktabs = T) %>% kable_styling(full_width = FALSE, font_size = 11, latex_options = c("striped", 'condensed','scale_down'), ) %>% column_spec(3, width = "12em")
+
+perf_table_LT2<- submodel_calibrate_tbl %>% modeltime_accuracy()
+
+
+perf_table_SAL<- submodel_calibrate_tbl_SAL %>% modeltime_accuracy()
+
+top3_model_LT2<- perf_table_LT2 %>% top_n(-3, wt = rmse)
+top3_model_SAL<- perf_table_SAL %>% top_n(-3, wt = rmse)
+
+
 ````
 
 ````{r viz forecast, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
 submodel_calibrate_tbl %>% modeltime_forecast(new_data = testing(splits),
                                               actual_data = train_LT2_tbl,
                                               keep_data = TRUE) %>% 
+                           filter(Date >= as.Date('2018-01-01')) %>%
                            plot_modeltime_forecast(.title = 'Depth_to_Groundwater_LT2 forecast',
                                                    .interactive = FALSE)
 
 submodel_calibrate_tbl_SAL %>% modeltime_forecast(new_data = testing(splits_SAL),
                                                   actual_data = train_SAL_tbl,
                                                   keep_data = TRUE) %>%
-                               filter(Date)
+                               filter(Date >= as.Date('2018-01-01')) %>%
                                plot_modeltime_forecast(.title = 'Depth_to_Groundwater_SAL forecast', 
                                                        .interactive = FALSE)
 
 ````
-p2<-p %+% mtcars[mtcars$disp>200,]
+
+For the prediction of Depth to groundwater LT2 as shown in the first plot and first table the 3 best models according to RMSE are `r as.character(top3_model_LT2$.model_desc)`. The best RMSE error was `r round(min(top3_model_LT2$rmse),2)`, which means that the Ranger random forest model was on average wrong by 27 centimeters for the level of water indicated by the LT2 sensor.
+
+In the same way For the prediction of Depth to groundwater LT2 as shown in the first plot and first table the 3 best models according to RMSE are `r as.character(top3_model_SAL$.model_desc)`. The best RMSE error was `r round(min(top3_model_SAL$rmse),2)`, which means that the Ranger random forest model was on average wrong by 25 centimeters for the level of water indicated by the SAL sensor.
+
+To boost performance in both LT2 prediction model and SAL prediction model we try to unite and ensemble the 3 best models for each one.
+\pagebreak
+
+````{r ensemble, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE, results = "asis"}
+ensemble_fit_mean<- submodels_tbl %>%
+                    filter(.model_id %in% top3_model_LT2$.model_id) %>%
+                    ensemble_average(type = 'mean')
+
+ensemble_tbl<- modeltime_table(ensemble_fit_mean)
+
+ensemble_tbl %>% combine_modeltime_tables(submodels_tbl) %>%
+                 modeltime_accuracy(testing(splits)) %>% kable('latex', digits = 10, caption = 'Depth to groundwater LT2     ensemble prediction model performance', booktabs = T) %>% kable_styling(full_width = FALSE, font_size = 11, latex_options = c("striped", 'condensed','scale_down')) %>% column_spec(3, width = "12em")
+
+ensemble_tbl %>% modeltime_forecast(new_data = testing(splits),
+                                    actual_data = train_LT2_tbl,
+                                    keep_data = TRUE) %>%
+                 filter(Date >= as.Date('2018-01-01')) %>%
+                      plot_modeltime_forecast(.title = 'Depth_to_Groundwater_LT2 ensemble forecast', 
+                                              .interactive = FALSE)
+cat("\\newpage")
+
+#SAl ensemble
+ensemble_fit_mean_SAL<- submodels_tbl_SAL %>%
+                        filter(.model_id %in% top3_model_SAL$.model_id) %>%
+                        ensemble_average(type = 'mean')
+
+ensemble_tbl_SAL<- modeltime_table(ensemble_fit_mean_SAL)
+
+ensemble_tbl_SAL %>% combine_modeltime_tables(submodels_tbl_SAL) %>%
+                     modeltime_accuracy(testing(splits_SAL)) %>% kable('latex', digits = 10, caption = 'Depth to groundwater SAL ensemble prediction model performance', booktabs = T) %>% kable_styling(full_width = FALSE, font_size = 11, latex_options = c("striped", 'condensed','scale_down')) %>% column_spec(3, width = "12em")
+
+ensemble_tbl_SAL %>% modeltime_forecast(new_data = testing(splits_SAL),
+                                        actual_data = train_SAL_tbl,
+                                        keep_data = TRUE) %>%
+                     filter(Date >= as.Date('2018-01-01')) %>%
+                     plot_modeltime_forecast(.title = 'Depth_to_Groundwater_SAL ensemble forecast', 
+                                                       .interactive = FALSE)
+````
+
+This approach is very powerful but using the mean value of each model didn't improve the RMSE. An alternative approach is weight the model in the ensemble.
+
+\pagebreak
+
+````{r weighed ensemble, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+loadings<- c(0.4,0.4,0.2)
+
+#LT2 ensemble
+ensemble_fit_weight<- submodels_tbl %>%
+  filter(.model_id %in% top3_model_LT2$.model_id) 
+
+ensemble_fit_weight<- ensemble_fit_weight[order(top3_model_LT2$rmse),]
+
+ensemble_fit_weight<- ensemble_fit_weight %>% ensemble_weighted(loadings = c(0.4,0.4,0.2))
+
+ensemble_tbl_w<- modeltime_table(ensemble_fit_weight)
+
+ensemble_tbl_w %>% combine_modeltime_tables(submodels_tbl) %>% 
+                   modeltime_accuracy(testing(splits)) %>% kable('latex', digits = 10, caption = 'Depth to groundwater LT2 weighted ensemble prediction model performance', booktabs = T) %>% kable_styling(full_width = FALSE, font_size = 11, latex_options = c("striped", 'condensed','scale_down')) %>% column_spec(3, width = "12em")
+
+ensemble_tbl_w_cal<- ensemble_tbl_w %>% modeltime_calibrate(testing(splits))
+
+ensemble_tbl_w_cal %>% modeltime_forecast(new_data = testing(splits),
+                                    actual_data = train_LT2_tbl,
+                                    keep_data = TRUE) %>%
+                       filter(Date >= as.Date('2018-01-01')) %>%
+                       plot_modeltime_forecast(.title = 'Depth_to_Groundwater_LT2 weighted ensemble forecast',
+                                                       .interactive = FALSE)
+
+#SAL ensemble
+ensemble_fit_weight_SAL<- submodels_tbl_SAL %>%
+                          filter(.model_id %in% top3_model_SAL$.model_id) 
+                        
+ensemble_fit_weight_SAL<- ensemble_fit_weight_SAL[order(top3_model_SAL$rmse),]
+                        
+ensemble_fit_weight_SAL<- ensemble_fit_weight_SAL %>% ensemble_weighted(loadings = c(0.4,0.4,0.2))
+
+ensemble_tbl_w_SAL<- modeltime_table(ensemble_fit_weight_SAL)
+
+ensemble_tbl_w_SAL %>% combine_modeltime_tables(submodels_tbl_SAL) %>%
+                       modeltime_accuracy(testing(splits_SAL)) %>% kable('latex', digits = 10, caption = 'Depth to groundwater SAL weighted ensemble prediction model performance', booktabs = T) %>% kable_styling(full_width = FALSE, font_size = 11, latex_options = c("striped", 'condensed','scale_down')) %>% column_spec(3, width = "12em")
+
+ensemble_tbl_w_SAL_cal<- ensemble_tbl_w_SAL %>% modeltime_calibrate(testing(splits_SAL))
+
+
+ensemble_tbl_w_SAL_cal %>% modeltime_forecast(new_data = testing(splits_SAL),
+                                        actual_data = train_SAL_tbl,
+                                        keep_data = TRUE) %>%
+                     filter(Date >= as.Date('2018-01-01')) %>%
+                     plot_modeltime_forecast(.title = 'Depth_to_Groundwater_SAL weighted ensemble forecast',
+                                                       .interactive = FALSE)
+````
