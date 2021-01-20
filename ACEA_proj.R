@@ -106,6 +106,8 @@ recipe_1_SAL<- recipe(Depth_to_Groundwater_SAL ~., training(splits_SAL)) %>%
                step_mutate(Date_day = factor(Date_day, ordered = TRUE)) %>%
                step_dummy(all_nominal(), one_hot = TRUE)
 
+
+
 recipe_1 %>% prep() %>% juice() %>% glimpse()
 recipe_1_SAL %>% prep() %>% juice() %>% glimpse()
 
@@ -181,6 +183,8 @@ wflw_fit_prophet_boost_SAL<- workflow() %>%
                              add_recipe(recipe_1_SAL) %>%
                              fit(training(splits_SAL))
 
+
+
 # 7.0 Modeltime workflow ----
 submodels_tbl<- modeltime_table(wflw_fit_prophet,
                                 wflw_fit_xgboost,
@@ -200,20 +204,22 @@ submodel_calibrate_tbl<- submodels_tbl %>% modeltime_calibrate(testing(splits))
 submodel_calibrate_tbl_SAL<- submodels_tbl_SAL %>% modeltime_calibrate(testing(splits_SAL))
 
 # Measure Accuracy
-submodel_calibrate_tbl %>% modeltime_accuracy()
-submodel_calibrate_tbl_SAL %>% modeltime_accuracy()
+perf_table_LT2<- submodel_calibrate_tbl %>% modeltime_accuracy()
+perf_table_LT2
+
+perf_table_SAL<- submodel_calibrate_tbl_SAL %>% modeltime_accuracy()
+perf_table_SAL
 
 #Visualize test forecast
 submodel_calibrate_tbl %>% modeltime_forecast(new_data = testing(splits),
-                                              actual_data = train_LT2_tbl,
-                                              keep_data = TRUE) %>%
+                                                  actual_data = train_LT2_tbl,
+                                                  keep_data = TRUE) %>%
                            plot_modeltime_forecast()
 
 submodel_calibrate_tbl_SAL %>% modeltime_forecast(new_data = testing(splits_SAL),
                                                   actual_data = train_SAL_tbl,
                                                   keep_data = TRUE) 
                                plot_modeltime_forecast()
-
 
 #Refit
 submodels_refit_tbl<- submodel_calibrate_tbl %>%
@@ -235,19 +241,42 @@ submodels_refit_tbl_SAL %>% modeltime_forecast(new_data = future_SAL_tbl,
 
 
 # 8.0 Ensemble models
+top3_model_LT2<- perf_table_LT2 %>% top_n(-3, wt = rmse)
+top3_model_SAL<- perf_table_SAL %>% top_n(-3, wt = rmse)
+
+
 ensemble_fit_mean<- submodels_tbl %>%
-                    filter(!.model_id %in% c(2,4)) %>%
+                    filter(.model_id %in% top3_model_LT2$.model_id)  %>%
                     ensemble_average(type = 'mean')
 
+loadings<- c(0.4,0.4,0.2)
+
+ensemble_fit_weight<- submodels_tbl %>%
+  filter(.model_id %in% top3_model_LT2$.model_id) 
+
+ensemble_fit_weight<- ensemble_fit_weight[order(top3_model_LT2$rmse),]
+
+ensemble_fit_weight<- ensemble_fit_weight %>% ensemble_weighted(loadings = c(0.4,0.4,0.2))
+
 ensemble_tbl<- modeltime_table(ensemble_fit_mean)
+ensemble_tbl_w<- modeltime_table(ensemble_fit_weight)
+
 
 ensemble_tbl %>% combine_modeltime_tables(submodels_tbl) %>%
                  modeltime_accuracy(testing(splits))
 
+ensemble_tbl_w %>% combine_modeltime_tables(submodels_tbl) %>% 
+                   modeltime_accuracy(testing(splits))
+
 ensemble_tbl %>% modeltime_forecast(new_data = testing(splits),
                                     actual_data = train_LT2_tbl,
                                     keep_data = TRUE) %>%
-                plot_modeltime_forecast()
+                 plot_modeltime_forecast()
+
+ensemble_tbl_w %>% modeltime_forecast(new_data = testing(splits),
+                                    actual_data = train_LT2_tbl,
+                                    keep_data = TRUE) %>%
+                   plot_modeltime_forecast()
 
 ensemble_refit_tbl<- ensemble_tbl %>% modeltime_refit(train_LT2_tbl)
 
@@ -258,15 +287,30 @@ ensemble_refit_tbl %>% modeltime_forecast(new_data = future_LT2_tbl,
 
 #SAl ensemble
 ensemble_fit_mean_SAL<- submodels_tbl_SAL %>%
-                        filter(!.model_id %in% c(4,5)) %>%
+                        filter(.model_id %in% top3_model_SAL$.model_id) %>%
                         ensemble_average(type = 'mean')
+                        
+                        
+ensemble_fit_weight_SAL<- submodels_tbl_SAL %>%
+                          filter(.model_id %in% top3_model_SAL$.model_id) 
+                        
+ensemble_fit_weight_SAL<- ensemble_fit_weight_SAL[order(top3_model_SAL$rmse),]
+                        
+ensemble_fit_weight_SAL<- ensemble_fit_weight_SAL %>% ensemble_weighted(loadings = c(0.4,0.4,0.2))
+
 
 ensemble_tbl_SAL<- modeltime_table(ensemble_fit_mean_SAL)
+ensemble_tbl_w_SAL<- modeltime_table(ensemble_fit_weight_SAL)
+
 
 ensemble_tbl_SAL %>% combine_modeltime_tables(submodels_tbl_SAL) %>%
                      modeltime_accuracy(testing(splits_SAL))
+
+ensemble_tbl_w_SAL %>% combine_modeltime_tables(submodels_tbl_SAL) %>%
+                       modeltime_accuracy(testing(splits_SAL))
 
 ensemble_tbl_SAL %>% modeltime_forecast(new_data = testing(splits_SAL),
                                         actual_data = train_SAL_tbl,
                                         keep_data = TRUE) %>%
                      plot_modeltime_forecast()
+
