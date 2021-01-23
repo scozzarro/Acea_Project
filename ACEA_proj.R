@@ -8,6 +8,7 @@ library(modeltime.ensemble)
 library(visdat)
 library(corrplot)
 
+
 # 2.0 Data ----
 
 data<- read.csv('E:/Data_science/Acea_project/Aquifer_Auser.csv')
@@ -218,7 +219,7 @@ submodel_calibrate_tbl %>% modeltime_forecast(new_data = testing(splits),
 
 submodel_calibrate_tbl_SAL %>% modeltime_forecast(new_data = testing(splits_SAL),
                                                   actual_data = train_SAL_tbl,
-                                                  keep_data = TRUE) 
+                                                  keep_data = TRUE) %>%
                                plot_modeltime_forecast()
 
 #Refit
@@ -314,3 +315,94 @@ ensemble_tbl_SAL %>% modeltime_forecast(new_data = testing(splits_SAL),
                                         keep_data = TRUE) %>%
                      plot_modeltime_forecast()
 
+
+# 8.0 H2o modelling ----
+library(h2o)
+# full_data_LT2 %>% ggplot(aes(Date, Depth_to_Groundwater_LT2)) +
+#                   #train region
+#                   annotate('text', x = lubridate::ymd("2010-01-01"), y = -8.5,
+#                   color = tidyquant::palette_light()[[1]], label = "Train Region") +
+#                   #Validation region
+#                   geom_rect(xmin = as.numeric(lubridate::ymd("2019-01-01")), 
+#                   xmax = as.numeric(lubridate::ymd("2019-12-31")),
+#                   ymin = 0, ymax = Inf, alpha = 0.02,
+#                   fill = 'red') +
+#                   annotate("text", x = lubridate::ymd("2019-02-01"), y = -8.5,
+#                   color = tidyquant::palette_light()[[1]], label = "Validation\nRegion") +
+#                   #test region
+#                   geom_rect(xmin = as.numeric(lubridate::ymd("2020-01-01")), 
+#                   xmax = as.numeric(lubridate::ymd("2020-06-30")),
+#                   ymin = 0, ymax = Inf, alpha = 0.02,
+#                   fill = tidyquant::palette_light()[[4]]) +
+#                   annotate("text", x = lubridate::ymd("2020-06-01"), y = -8.5,
+#                   color = tidyquant::palette_light()[[1]], label = "Test\nRegion") +
+#                   #Data
+#                   geom_line(col = tidyquant::palette_light()[1]) +
+#                   # Aesthetics
+#                   tidyquant::theme_tq() +
+#                   scale_x_date(date_breaks = "1 year", date_labels = "%Y")
+                  
+  
+                  
+
+
+LT2_prep_h2o<- train_LT2_tbl %>% mutate(trend = 1:nrow(train_LT2_tbl), trend_sqr = trend^2)
+LT2_prep_h2o<- LT2_prep_h2o %>% 
+               tk_augment_timeseries_signature() %>% 
+               select_if(~ !lubridate::is.Date(.)) %>%
+               select_if(~ !any(is.na(.))) %>%
+               mutate_if(is.ordered, ~ as.character(.) %>% as.factor)
+
+LT2_train_h2o <- LT2_prep_h2o %>% filter(year < 2019)
+LT2_valid_h2o <- LT2_prep_h2o %>% filter(year == 2019)
+Lt2_test_h2o  <- LT2_prep_h2o %>% filter(year == 2020)
+
+h2o.init()
+
+train_h2o <- as.h2o(LT2_train_h2o)
+valid_h2o <- as.h2o(LT2_valid_h2o)
+test_h2o  <- as.h2o(Lt2_test_h2o)
+
+y <- "Depth_to_Groundwater_LT2"
+x <- setdiff(names(train_h2o), y)
+
+automl_models_h2o <- h2o.automl(
+  x = x, 
+  y = y, 
+  training_frame = train_h2o, 
+  validation_frame = valid_h2o, 
+  leaderboard_frame = test_h2o,
+  stopping_tolerance = 0.005,
+  max_runtime_secs = 600,
+  stopping_metric = "RMSE")
+
+automl_models_h2o@leaderboard
+
+automl_leader <- automl_models_h2o@leader
+
+automl_leader
+library(vip)
+
+vip_plot<- vip(automl_leader)
+
+vip_plot
+
+perf_automl<- h2o.performance(automl_leader, newdata = test_h2o)
+perf_automl
+
+path = "/models"
+
+h2o.saveModel(automl_leader, path)
+
+pred_h2o <- h2o.predict(automl_leader, newdata = test_h2o)
+
+
+error_tbl <- train_LT2_tbl %>% 
+  filter(lubridate::year(Date) == 2020) %>%
+  add_column(pred = pred_h2o %>% as.tibble() %>% pull(predict)) %>%
+  rename(actual = Depth_to_Groundwater_LT2)
+
+error_tbl %>% ggplot(aes(Date)) +
+              geom_line(aes(y = actual), col = 'blue', size = 1) +
+              geom_line(aes(y = pred), col = 'red', size = 1) +
+              ylab('')
