@@ -33,6 +33,8 @@ library(modeltime.ensemble)
 library(visdat)
 library(kableExtra)
 library(corrplot)
+library(vip)
+library(h2o)
 ````
 
 ## 2.0 Data
@@ -178,7 +180,7 @@ data %>% drop_na() %>% select(!c('Date')) %>%
                        corrplot(method = 'circle', tl.cex = 0.6)
 ````
 
-## Prediction Model 
+## 3.0 Prediction Model 
 
 Since the nature of the datasets is temporal the first prediction model approach is a Time series forecasting. 
 The temporal horizon for the forecast is 360 days. This method will be apply on 2 target variable to asses the efficacy.
@@ -445,3 +447,83 @@ ensemble_tbl_w_SAL_cal %>% modeltime_forecast(new_data = testing(splits_SAL),
                      plot_modeltime_forecast(.title = 'Depth_to_Groundwater_SAL weighted ensemble forecast',
                                                        .interactive = FALSE)
 ````
+
+The weighted ensemble approach is promising and worth more trials with different models even more than 3. 
+All considered, the prophet showed great potential and can be improved using what it is called 'special date' or 'holiday' feature that need a set of dates which is correlated to a special event in the time series and so has more importance in the model. 
+
+In the next section another approach using H2O.ai that contains a number of cutting edge machine learning algorithms including Deep Learning.
+
+\pagebreak
+
+
+### 3.1 Prediction model using H2O.ai
+To use H2O.ai machine learning we will need to built a java virtual machine using R. 
+Before that some data prepossessing was done using timetk lib augmented timeseries signature function which  expands out the timestamp information column-wise into a machine learning feature set, adding columns of time series information to the original data frame. We also add a trend and trend squared features with a simple numeric index to control the upward trend and the potential non-linear trend. The data was transform as follow:
+
+````{r h2o LT2 preprocessing, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+LT2_prep_h2o<- train_LT2_tbl %>% mutate(trend = 1:nrow(train_LT2_tbl), trend_sqr = trend^2)
+LT2_prep_h2o<- LT2_prep_h2o %>% 
+               tk_augment_timeseries_signature() %>% 
+               select_if(~ !lubridate::is.Date(.)) %>%
+               select_if(~ !any(is.na(.))) %>%
+               mutate_if(is.ordered, ~ as.character(.) %>% as.factor)
+
+LT2_prep_h2o %>% head() %>% glimpse()
+````
+The automachine learning function of H2O.ai was used. This function try several models and suggest the best one according to a chosen metric, which in this case it's RMSE. Above the resulting table with the model tried and the relative performances. 
+````{r h2o model leaderboard, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+LT2_train_h2o <- LT2_prep_h2o %>% filter(year < 2019)
+LT2_valid_h2o <- LT2_prep_h2o %>% filter(year == 2019)
+Lt2_test_h2o  <- LT2_prep_h2o %>% filter(year == 2020)
+
+h2o.init()
+
+h2o.no_progress()
+
+
+train_h2o <- as.h2o(LT2_train_h2o)
+valid_h2o <- as.h2o(LT2_valid_h2o)
+test_h2o  <- as.h2o(Lt2_test_h2o)
+
+y <- "Depth_to_Groundwater_LT2"
+x <- setdiff(names(train_h2o), y)
+
+automl_models_h2o <- h2o.automl(
+  x = x, 
+  y = y, 
+  training_frame = train_h2o, 
+  validation_frame = valid_h2o, 
+  leaderboard_frame = test_h2o,
+  stopping_tolerance = 0.005,
+  max_runtime_secs = 600,
+  stopping_metric = "RMSE")
+
+automl_models_h2o@leaderboard %>% as.tibble() %>% head() %>% kable('latex', digits = 10, caption = 'H2o models leaderboard', booktabs = T) %>% kable_styling(full_width = FALSE, font_size = 11, latex_options = c("striped", 'condensed','scale_down')) 
+
+automl_leader <- automl_models_h2o@leader
+
+````
+\pagebreak
+The leader model has the follow variable importance and performance:
+
+````{r varimp e perf, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+
+vip_plot<- vip(automl_leader)
+vip_plot
+
+perf_automl<- h2o.performance(automl_leader, newdata = test_h2o)
+perf_automl
+
+pred_h2o <- h2o.predict(automl_leader, newdata = test_h2o)
+
+error_tbl <- train_LT2_tbl %>% 
+             filter(lubridate::year(Date) == 2020) %>%
+             add_column(pred = pred_h2o %>% as.tibble() %>% pull(predict)) %>%
+             rename(actual = Depth_to_Groundwater_LT2)
+
+error_tbl %>% ggplot(aes(Date)) +
+              geom_line(aes(y = actual), col = 'blue', size = 1) +
+              geom_line(aes(y = pred), col = 'red', size = 1) +
+              ylab('')
+````
+A great improvement was obtain using this approach. The RMSE went down to 0.10 wich mean that the model on average was wrong by only 10 cm for the level of water indicated by the LT2 sensor.
